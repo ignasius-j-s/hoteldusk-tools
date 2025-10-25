@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for (i, frame) in frames.iter().enumerate() {
             let anim_fram = webp::AnimFrame::from_rgba(
-                &frame,
+                frame,
                 width as u32,
                 height as u32,
                 i as i32 * FRAME_DURATION_MS,
@@ -123,9 +123,7 @@ fn decompress(mut input: &[u8]) -> Option<Vec<u8>> {
             (true, _) => {
                 let len = (ctrl & 0x7f) as usize;
                 assert!(len != 0);
-                for _ in 0..len {
-                    output.push(0xFF);
-                }
+                output.extend(std::iter::repeat_n(0xFF, len));
             }
             (false, true) => {
                 let len = (ctrl & 0x3F) as usize;
@@ -144,5 +142,6 @@ fn decompress(mut input: &[u8]) -> Option<Vec<u8>> {
             }
         }
     }
+
     Some(output)
 }
