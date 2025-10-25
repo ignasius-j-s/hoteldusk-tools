@@ -129,9 +129,7 @@ fn decompress(mut input: &[u8]) -> Option<Vec<u8>> {
                 let len = (ctrl & 0x3F) as usize;
                 assert!(len != 0);
                 let byte: u8 = input.read_le().ok()?;
-                for _ in 0..len {
-                    output.push(byte);
-                }
+                output.extend(std::iter::repeat_n(byte, len));
             }
             (false, false) => {
                 let len = (ctrl & 0x3F) as usize;
