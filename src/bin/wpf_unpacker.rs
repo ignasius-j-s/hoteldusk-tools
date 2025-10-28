@@ -44,8 +44,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             let path = output_path.join(name);
             let mut data = vec![0; size as usize];
             file.read_exact(&mut data)?;
-            file.seek(SeekFrom::Start(next as u64))?;
             std::fs::write(path, data)?;
+            file.seek(SeekFrom::Start(next as u64))?;
         }
     }
 

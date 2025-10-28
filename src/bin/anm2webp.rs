@@ -80,7 +80,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             let last_frame = frames.last();
             for (i, &b) in decompressed.iter().enumerate() {
                 if let (Some(last_frame), 255) = (last_frame, b) {
-                    frame.write_bytes(&last_frame[i * 4..][..4])?;
+                    let pos = i * 4;
+                    frame.write_bytes(&last_frame[pos..][..4])?;
                 } else {
                     let index = b as usize % palette_count;
                     frame.write_bytes(&palette[index])?;

@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut data = std::fs::read(file)?;
         let output = Path::new(file).with_extension("png");
 
-        if let Ok(decompressed) = decompress(&mut Cursor::new(&data)) {
+        if let Ok(decompressed) = decompress(&mut data.as_slice()) {
             data = decompressed;
         }
 
@@ -51,14 +51,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             let pixel_data_len = width as usize * height as usize;
-            let pixel_data = Vec::with_capacity(pixel_data_len * size_of::<Color>());
-            let mut pixel_cursor = Cursor::new(pixel_data);
+            let mut pixel_data = Vec::with_capacity(pixel_data_len * size_of::<Color>());
             for _ in 0..pixel_data_len {
                 let index: u8 = reader.read_le()?;
-                pixel_cursor.write_bytes(&palette[index as usize % palette_count as usize])?;
+                pixel_data.write_bytes(&palette[index as usize % palette_count as usize])?;
             }
 
-            (pixel_cursor.into_inner(), width as u32, height as u32)
+            (pixel_data, width as u32, height as u32)
         } else {
             const TILE_W: usize = 8;
             const TILE_H: usize = 8;

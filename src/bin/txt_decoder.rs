@@ -2,7 +2,7 @@ use hoteldusk_tools::util::ReadExt;
 use std::{
     error::Error,
     fs::File,
-    io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -28,10 +28,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let mut buf = vec![0; 4 * lines_count as usize];
         file.read_exact(&mut buf)?;
-        let mut lines_table = Cursor::new(buf);
+        let mut lines_table = buf.as_slice();
 
         let mut buf_reader = BufReader::new(&file);
-        let mut buf_writer = Cursor::new(Vec::new());
+        let mut buf_writer = BufWriter::new(vec![]);
         for _ in 0..lines_count {
             let mut lines_buf = Vec::new();
             let offset = lines_start + lines_table.read_le::<u32>()?;
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             buf_writer.write_all(b"\n")?;
         }
 
-        std::fs::write(txt_file, buf_writer.into_inner())?;
+        std::fs::write(txt_file, buf_writer.into_inner()?).ok();
     }
 
     Ok(())
