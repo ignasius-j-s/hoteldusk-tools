@@ -1,4 +1,4 @@
-use hoteldusk_tools::util::{Color, ReadExt, WriteExt};
+use hoteldusk_tools::util::{Color, ReadExt};
 use std::{
     error::Error,
     io::{Cursor, Read, Seek},
@@ -48,7 +48,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         let _frame: u16 = reader.read_le()?;
 
         let mut frames: Vec<Vec<u8>> = Vec::with_capacity(frame_count as usize);
-        let bitmap_len = width as usize * height as usize * 4;
         reader.set_position(32);
         for _ in 0..frame_count {
             let pos = reader.read_le::<u32>()? as usize;
@@ -64,10 +63,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             assert!(zero == 0);
 
-            let Some(decompressed) = decompress(compressed) else {
-                continue;
-            };
-
             let mut buf = [0; 2];
             let mut palette = Vec::with_capacity(palette_count);
             for _ in 0..palette_count {
@@ -76,19 +71,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 palette.push(color);
             }
 
-            let mut frame = Vec::with_capacity(bitmap_len);
             let last_frame = frames.last();
-            for (i, &b) in decompressed.iter().enumerate() {
-                if let (Some(last_frame), 255) = (last_frame, b) {
-                    let pos = i * 4;
-                    frame.write_bytes(&last_frame[pos..][..4])?;
-                } else {
-                    let index = b as usize % palette_count;
-                    frame.write_bytes(&palette[index])?;
-                }
-            }
-
-            frames.push(frame);
+            if let Some(frame) = decompress_frame(compressed, width, height, last_frame, &palette) {
+                frames.push(frame);
+            } else {
+                continue;
+            };
         }
 
         let mut encoder = webp::AnimEncoder::new(width as u32, height as u32, &config);
@@ -113,8 +101,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn decompress(mut input: &[u8]) -> Option<Vec<u8>> {
-    let mut output = Vec::with_capacity(256 * 192);
+fn decompress_frame(
+    mut input: &[u8],
+    width: u16,
+    height: u16,
+    last_frame: Option<&Vec<u8>>,
+    palette: &[Color],
+) -> Option<Vec<u8>> {
+    let palette_count = palette.len();
+    let last_color = palette.last().unwrap().as_ref();
+    let mut frame = Vec::with_capacity(width as usize * height as usize * 4);
 
     while let Ok(ctrl) = input.read_le::<u8>() {
         let f1 = (ctrl >> 7) & 1 == 1;
@@ -122,25 +118,39 @@ fn decompress(mut input: &[u8]) -> Option<Vec<u8>> {
 
         match (f1, f2) {
             (true, _) => {
-                let len = (ctrl & 0x7F) as usize;
-                assert!(len != 0);
-                output.extend(std::iter::repeat_n(0xFF, len));
+                let count = (ctrl & 0x7F) as usize;
+                assert!(count != 0);
+
+                match last_frame {
+                    Some(last_frame) => {
+                        let pos = frame.len();
+                        let len = count * 4;
+                        let colors = &last_frame[pos..][..len];
+                        frame.extend(colors);
+                    }
+                    None => frame.extend(last_color.iter().cycle().take(count * 4)),
+                }
             }
             (false, true) => {
-                let len = (ctrl & 0x3F) as usize;
-                assert!(len != 0);
-                let byte: u8 = input.read_le().ok()?;
-                output.extend(std::iter::repeat_n(byte, len));
+                let count = (ctrl & 0x3F) as usize;
+                assert!(count != 0);
+
+                let color_index = input.read_le::<u8>().ok()? as usize;
+                let color = palette[color_index % palette_count].as_ref();
+                frame.extend(color.iter().cycle().take(count * 4));
             }
             (false, false) => {
-                let len = (ctrl & 0x3F) as usize;
-                assert!(len != 0);
-                let current_len = output.len();
-                output.resize(current_len + len, 0);
-                input.read_exact(&mut output[current_len..]).ok()?;
+                let count = (ctrl & 0x3F) as usize;
+                assert!(count != 0);
+
+                for _ in 0..count {
+                    let color_index = input.read_le::<u8>().ok()? as usize;
+                    let color = palette[color_index % palette_count].as_ref();
+                    frame.extend(color);
+                }
             }
         }
     }
 
-    Some(output)
+    Some(frame)
 }

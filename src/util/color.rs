@@ -1,4 +1,5 @@
 // rgba8888 color
+#[derive(Clone, Copy)]
 pub struct Color([u8; 4]);
 
 impl AsRef<[u8]> for Color {
