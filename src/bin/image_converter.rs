@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut pixel_data = Vec::with_capacity(pixel_data_len * size_of::<Color>());
             for _ in 0..pixel_data_len {
                 let index: u8 = reader.read_le()?;
-                pixel_data.write_bytes(&palette[index as usize % palette_count as usize])?;
+                pixel_data.write_bytes(palette[index as usize % palette_count as usize])?;
             }
 
             (pixel_data, width as u32, height as u32)
