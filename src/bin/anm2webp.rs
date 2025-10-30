@@ -122,7 +122,7 @@ fn decompress(mut input: &[u8]) -> Option<Vec<u8>> {
 
         match (f1, f2) {
             (true, _) => {
-                let len = (ctrl & 0x7f) as usize;
+                let len = (ctrl & 0x7F) as usize;
                 assert!(len != 0);
                 output.extend(std::iter::repeat_n(0xFF, len));
             }

@@ -79,3 +79,6 @@ pub trait WriteExt: Write + Sized {
         T::write_be(value, self)
     }
 }
+
+impl<T: Read> ReadExt for T {}
+impl<T: Write> WriteExt for T {}
