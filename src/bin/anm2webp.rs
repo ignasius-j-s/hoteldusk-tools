@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let _unknown: u32 = reader.read_le()?;
         let frame_count: u32 = reader.read_le()?;
         let _some_len: u32 = reader.read_le()?;
-        let _unknown: u32 = reader.read_le()?;
+        let default_color_index: u32 = reader.read_le()?;
         let width: u16 = reader.read_le()?;
         let height: u16 = reader.read_le()?;
         let _frame: u16 = reader.read_le()?;
@@ -71,8 +71,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 palette.push(color);
             }
 
-            let last_frame = frames.last();
-            if let Some(frame) = decompress_frame(compressed, width, height, last_frame, &palette) {
+            if let Some(frame) = decompress_frame(
+                compressed,
+                width,
+                height,
+                frames.last(),
+                &palette,
+                default_color_index as usize,
+            ) {
                 frames.push(frame);
             } else {
                 continue;
@@ -81,17 +87,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let mut encoder = webp::AnimEncoder::new(width as u32, height as u32, &config);
         encoder.set_bgcolor([255; 4]);
-        // infinite loop? not documented.
-        encoder.set_loop_count(0);
+        encoder.set_loop_count(0); // infinite loop.
 
         for (i, frame) in frames.iter().enumerate() {
-            let anim_fram = webp::AnimFrame::from_rgba(
+            let anim_frame = webp::AnimFrame::from_rgba(
                 frame,
                 width as u32,
                 height as u32,
                 i as i32 * FRAME_DURATION_MS,
             );
-            encoder.add_frame(anim_fram);
+            encoder.add_frame(anim_frame);
         }
 
         let webp = encoder.encode();
@@ -105,12 +110,17 @@ fn decompress_frame(
     mut input: &[u8],
     width: u16,
     height: u16,
-    last_frame: Option<&Vec<u8>>,
+    maybe_last_frame: Option<&Vec<u8>>,
     palette: &[Color],
+    default_color_index: usize,
 ) -> Option<Vec<u8>> {
     let palette_count = palette.len();
-    let last_color = palette.last().unwrap().as_ref();
+    let default_color = palette[default_color_index % palette_count].as_ref();
     let mut frame = Vec::with_capacity(width as usize * height as usize * 4);
+
+    // workaround for Br_bracelet_.anm
+    // this one use a bit different decompression method
+    let bracelet = input.len() == 49540;
 
     while let Ok(ctrl) = input.read_le::<u8>() {
         let f1 = (ctrl >> 7) & 1 == 1;
@@ -121,14 +131,25 @@ fn decompress_frame(
                 let count = (ctrl & 0x7F) as usize;
                 assert!(count != 0);
 
-                match last_frame {
+                match maybe_last_frame {
                     Some(last_frame) => {
                         let pos = frame.len();
                         let len = count * 4;
                         let colors = &last_frame[pos..][..len];
                         frame.extend(colors);
                     }
-                    None => frame.extend(last_color.iter().cycle().take(count * 4)),
+                    None => frame.extend(default_color.iter().cycle().take(count * 4)),
+                }
+            }
+            // workaround for bradley's bracelet image
+            (false, _) if bracelet => {
+                let count = (ctrl & 0x7F) as usize;
+                assert!(count != 0);
+
+                for _ in 0..count {
+                    let color_index = input.read_le::<u8>().ok()? as usize;
+                    let color = palette[color_index % palette_count].as_ref();
+                    frame.extend(color);
                 }
             }
             (false, true) => {
