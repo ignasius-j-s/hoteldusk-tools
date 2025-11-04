@@ -6,6 +6,9 @@ use std::{
 };
 
 const FRAME_DURATION_MS: i32 = 150;
+const MTC_WIDTH: usize = 17;
+const MTC_HEIGHT: usize = 33;
+const MTC_SUFFIX: &str = "m_.mtc";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let anm_files = std::env::args_os()
@@ -21,16 +24,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Usage: anm2webp anm_file(s) ...");
         return Ok(());
     }
-
-    let mut config = webp::WebPConfig::new().unwrap();
-    config.lossless = 1;
-    config.alpha_filtering = 0;
-    config.alpha_compression = 0;
-    config.quality = 100.0;
-    config.filter_sharpness = 0; // off
-    config.filter_strength = 0; // off
-    config.autofilter = 0;
-    config.preprocessing = 0; // none
 
     for file in &anm_files {
         let data = std::fs::read(file)?;
@@ -67,7 +60,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut palette = Vec::with_capacity(palette_count);
             for _ in 0..palette_count {
                 palette_data.read_exact(&mut buf)?;
-                let color = Color::from_bgr555(buf);
+                let color = Color::from_rgb555(buf);
                 palette.push(color);
             }
 
@@ -85,32 +78,61 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
         }
 
-        let mut encoder = webp::AnimEncoder::new(width as u32, height as u32, &config);
-        encoder.set_bgcolor([255; 4]);
-        encoder.set_loop_count(0); // infinite loop.
+        write_webp(&output, &frames, width as u32, height as u32);
 
-        for (i, frame) in frames.iter().enumerate() {
-            let anim_frame = webp::AnimFrame::from_rgba(
-                frame,
-                width as u32,
-                height as u32,
-                i as i32 * FRAME_DURATION_MS,
+        if let Some(overlay_frames) = get_overlay_frames(file) {
+            apply_overlay(
+                &mut frames,
+                &overlay_frames,
+                width as usize,
+                height as usize,
             );
-            encoder.add_frame(anim_frame);
-        }
 
-        let webp = encoder.encode();
-        std::fs::write(output, &*webp).ok();
+            let mut filename = output.file_stem().unwrap().to_os_string();
+            filename.push(".mtc.webp");
+            write_webp(filename.as_ref(), &frames, width as u32, height as u32);
+        };
     }
 
     Ok(())
+}
+
+fn write_webp(output: &Path, frames: &[Vec<u8>], width: u32, height: u32) {
+    let mut config = webp::WebPConfig::new().unwrap();
+    config.lossless = 1;
+    config.alpha_filtering = 0;
+    config.alpha_compression = 0;
+    config.quality = 100.0;
+    config.filter_sharpness = 0; // off
+    config.filter_strength = 0; // off
+    config.autofilter = 0;
+    config.preprocessing = 0; // none
+
+    let mut encoder = webp::AnimEncoder::new(width as u32, height as u32, &config);
+    encoder.set_bgcolor([255; 4]);
+    encoder.set_loop_count(0); // infinite loop.
+
+    for (i, frame) in frames.iter().enumerate() {
+        let anim_frame = webp::AnimFrame::from_rgba(
+            frame,
+            width as u32,
+            height as u32,
+            i as i32 * FRAME_DURATION_MS,
+        );
+        encoder.add_frame(anim_frame);
+    }
+
+    let webp = encoder.encode();
+    if let Err(err) = std::fs::write(output, &*webp) {
+        eprintln!("{err}")
+    };
 }
 
 fn decompress_frame(
     mut input: &[u8],
     width: u16,
     height: u16,
-    maybe_last_frame: Option<&Vec<u8>>,
+    maybe_prev_frame: Option<&Vec<u8>>,
     palette: &[Color],
     default_color_index: usize,
 ) -> Option<Vec<u8>> {
@@ -129,13 +151,12 @@ fn decompress_frame(
         match (f1, f2) {
             (true, _) => {
                 let count = (ctrl & 0x7F) as usize;
-                assert!(count != 0);
 
-                match maybe_last_frame {
-                    Some(last_frame) => {
+                match maybe_prev_frame {
+                    Some(prev_frame) => {
                         let pos = frame.len();
                         let len = count * 4;
-                        let colors = &last_frame[pos..][..len];
+                        let colors = &prev_frame[pos..][..len];
                         frame.extend(colors);
                     }
                     None => frame.extend(default_color.iter().cycle().take(count * 4)),
@@ -144,7 +165,6 @@ fn decompress_frame(
             // workaround for bradley's bracelet image
             (false, _) if bracelet => {
                 let count = (ctrl & 0x7F) as usize;
-                assert!(count != 0);
 
                 for _ in 0..count {
                     let color_index = input.read_le::<u8>().ok()? as usize;
@@ -154,7 +174,6 @@ fn decompress_frame(
             }
             (false, true) => {
                 let count = (ctrl & 0x3F) as usize;
-                assert!(count != 0);
 
                 let color_index = input.read_le::<u8>().ok()? as usize;
                 let color = palette[color_index % palette_count].as_ref();
@@ -162,7 +181,6 @@ fn decompress_frame(
             }
             (false, false) => {
                 let count = (ctrl & 0x3F) as usize;
-                assert!(count != 0);
 
                 for _ in 0..count {
                     let color_index = input.read_le::<u8>().ok()? as usize;
@@ -175,3 +193,116 @@ fn decompress_frame(
 
     Some(frame)
 }
+
+fn get_overlay_frames(anm_file: impl AsRef<Path>) -> Option<Vec<Vec<u8>>> {
+    let anm_file = anm_file.as_ref();
+    let mut mtc_file = anm_file.file_stem()?.to_os_string();
+    mtc_file.push(MTC_SUFFIX);
+    let path = anm_file.with_file_name(mtc_file);
+    let data = std::fs::read(path).ok()?;
+    let mut reader = data.as_slice();
+    let frame_count: u32 = reader.read_le().ok()?;
+    let _unused: [u8; 28] = reader.read_bytes().ok()?;
+
+    let mut frames = Vec::with_capacity(frame_count as usize);
+    for _ in 0..frame_count {
+        let mut frame = Vec::with_capacity(MTC_WIDTH * MTC_HEIGHT * 4);
+        let mut buf = [0; 2];
+
+        for _ in 0..MTC_WIDTH * MTC_HEIGHT {
+            reader.read_exact(&mut buf).ok()?;
+            frame.extend(Color::from_rgb555(buf).as_ref());
+        }
+
+        frames.push(frame);
+    }
+
+    Some(frames)
+}
+
+fn apply_overlay(frames: &mut [Vec<u8>], overlay_frames: &[Vec<u8>], w: usize, h: usize) {
+    for (frame, overlay) in frames.iter_mut().zip(overlay_frames.iter()) {
+        for (i, pixel) in frame.chunks_exact_mut(4).enumerate() {
+            // this address different orientation between frame and the overlay frame
+            let x = i / w;
+            let y = w - 1 - (i % w);
+            // swap the width and the height argument to address the different orientation
+            let overlay_color = get_overlay_color(overlay, x, y, h, w);
+            let frame_color: [u8; 4] = pixel.try_into().unwrap();
+            let multiplied = multiply_color(frame_color, overlay_color);
+            pixel.copy_from_slice(multiplied.as_slice());
+        }
+    }
+}
+
+fn get_overlay_color(overlay_frame: &[u8], x: usize, y: usize, w: usize, h: usize) -> [u8; 4] {
+    let x_scale = (MTC_WIDTH - 1) as f32 / (w - 1) as f32;
+    let y_scale = (MTC_HEIGHT - 1) as f32 / (h - 1) as f32;
+
+    let x = x as f32 * x_scale;
+    let y = y as f32 * y_scale;
+
+    let x0 = x.floor() as usize;
+    let x1 = (x + 1.0).min(MTC_WIDTH as f32 - 1.0).floor() as usize;
+    let y0 = y.floor() as usize;
+    let y1 = (y + 1.0).min(MTC_HEIGHT as f32 - 1.0).floor() as usize;
+
+    let get_color = |x, y| -> [u8; 4] {
+        let pos = ((y * MTC_WIDTH) + x) * 4;
+        overlay_frame[pos..][..4].try_into().unwrap()
+    };
+
+    let tl = get_color(x0, y0);
+    let tr = get_color(x1, y0);
+    let bl = get_color(x0, y1);
+    let br = get_color(x1, y1);
+
+    let wx = x.fract();
+    let wy = y.fract();
+
+    let lerp_top = lerp_color(tl, tr, wx);
+    let lerp_bottom = lerp_color(bl, br, wx);
+    lerp_color(lerp_top, lerp_bottom, wy)
+}
+
+fn lerp_color(color: [u8; 4], color1: [u8; 4], t: f32) -> [u8; 4] {
+    [
+        (color[0] as f32 * (1.0 - t) + color1[0] as f32 * t) as u8,
+        (color[1] as f32 * (1.0 - t) + color1[1] as f32 * t) as u8,
+        (color[2] as f32 * (1.0 - t) + color1[2] as f32 * t) as u8,
+        (color[3] as f32 * (1.0 - t) + color1[3] as f32 * t) as u8,
+    ]
+}
+
+fn multiply_color(color1: [u8; 4], color2: [u8; 4]) -> [u8; 4] {
+    const MAX: u16 = 0xFF;
+    [
+        (u16::from(color1[0]) * u16::from(color2[0]) / MAX) as u8,
+        (u16::from(color1[1]) * u16::from(color2[1]) / MAX) as u8,
+        (u16::from(color1[2]) * u16::from(color2[2]) / MAX) as u8,
+        (u16::from(color1[3]) * u16::from(color2[3]) / MAX) as u8,
+    ]
+}
+
+// fn multiply_color(color1: [u8; 4], color2: [u8; 4]) -> [u8; 4] {
+//     let max = f32::from(u8::MAX);
+//     let color1 = [
+//         f32::from(color1[0]) / max,
+//         f32::from(color1[1]) / max,
+//         f32::from(color1[2]) / max,
+//         f32::from(color1[3]) / max,
+//     ];
+//     let color2 = [
+//         f32::from(color2[0]) / max,
+//         f32::from(color2[1]) / max,
+//         f32::from(color2[2]) / max,
+//         f32::from(color2[3]) / max,
+//     ];
+
+//     [
+//         ((color1[0] * color2[0]) * max) as u8,
+//         ((color1[1] * color2[1]) * max) as u8,
+//         ((color1[2] * color2[2]) * max) as u8,
+//         ((color1[3] * color2[3]) * max) as u8,
+//     ]
+// }

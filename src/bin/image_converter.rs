@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             for _ in 0..palette_count {
                 let mut buf = [0; 2];
                 reader.read_exact(&mut buf)?;
-                let color = Color::from_bgr555(buf);
+                let color = Color::from_rgb555(buf);
                 palette.push(color);
             }
 
@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
 
-            if width as usize % TILE_W != 0 || height as usize % TILE_H != 0 {
+            if !width.is_multiple_of(TILE_W as u16) || !height.is_multiple_of(TILE_H as u16) {
                 eprintln!("image dimension isnt divisible by tile dimension");
                 continue;
             }
@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut buf = [0; 2];
             for _ in 0..palette_count {
                 reader.read_exact(&mut buf)?;
-                let color = Color::from_bgr555(buf);
+                let color = Color::from_rgb555(buf);
                 palette.push(color);
             }
 

@@ -47,7 +47,7 @@ impl_endian!(u8, u16, u32, u64);
 pub trait ReadExt: Read {
     #[inline]
     fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
-        let mut buf = [0_u8; N];
+        let mut buf = [0; N];
         self.read_exact(&mut buf)?;
         Ok(buf)
     }
