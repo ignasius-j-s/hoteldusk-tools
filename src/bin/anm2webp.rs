@@ -88,9 +88,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 height as usize,
             );
 
-            let mut filename = output.file_stem().unwrap().to_os_string();
-            filename.push(".mtc.webp");
-            write_webp(filename.as_ref(), &frames, width as u32, height as u32);
+            let output = output.with_extension("mtc.webp");
+            write_webp(&output, &frames, width as u32, height as u32);
         };
     }
 
@@ -108,17 +107,13 @@ fn write_webp(output: &Path, frames: &[Vec<u8>], width: u32, height: u32) {
     config.autofilter = 0;
     config.preprocessing = 0; // none
 
-    let mut encoder = webp::AnimEncoder::new(width as u32, height as u32, &config);
+    let mut encoder = webp::AnimEncoder::new(width, height, &config);
     encoder.set_bgcolor([255; 4]);
     encoder.set_loop_count(0); // infinite loop.
 
     for (i, frame) in frames.iter().enumerate() {
-        let anim_frame = webp::AnimFrame::from_rgba(
-            frame,
-            width as u32,
-            height as u32,
-            i as i32 * FRAME_DURATION_MS,
-        );
+        let anim_frame =
+            webp::AnimFrame::from_rgba(frame, width, height, i as i32 * FRAME_DURATION_MS);
         encoder.add_frame(anim_frame);
     }
 
