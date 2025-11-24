@@ -1,15 +1,18 @@
 use std::io::{Read, Result, Write};
 
-pub trait Endian: Sized {
+pub trait ReadEndian: Sized {
     fn read_le<R: Read + ?Sized>(reader: &mut R) -> Result<Self>;
     fn read_be<R: Read + ?Sized>(reader: &mut R) -> Result<Self>;
+}
+
+pub trait WriteEndian: Sized {
     fn write_le<W: Write + ?Sized>(self, writer: &mut W) -> Result<()>;
     fn write_be<W: Write + ?Sized>(self, writer: &mut W) -> Result<()>;
 }
 
 macro_rules! impl_endian {
     ($($type:ty),*) => ($(
-        impl Endian for $type {
+        impl ReadEndian for $type {
             #[inline]
             fn read_le<R: Read + ?Sized>(reader: &mut R) -> Result<Self> {
                 let mut buf = [0; size_of::<$type>()];
@@ -23,7 +26,9 @@ macro_rules! impl_endian {
                 reader.read_exact(&mut buf)?;
                 Ok(<$type>::from_be_bytes(buf))
             }
+        }
 
+        impl WriteEndian for $type {
             #[inline]
             fn write_le<W: Write + ?Sized>(self, writer: &mut W) -> Result<()> {
                 let buf = <$type>::to_le_bytes(self);
@@ -34,6 +39,22 @@ macro_rules! impl_endian {
             #[inline]
             fn write_be<W: Write + ?Sized>(self, writer: &mut W) -> Result<()> {
                 let buf = <$type>::to_be_bytes(self);
+                writer.write_all(&buf)?;
+                Ok(())
+            }
+        }
+
+        impl WriteEndian for &$type {
+            #[inline]
+            fn write_le<W: Write + ?Sized>(self, writer: &mut W) -> Result<()> {
+                let buf = self.to_le_bytes();
+                writer.write_all(&buf)?;
+                Ok(())
+            }
+
+            #[inline]
+            fn write_be<W: Write + ?Sized>(self, writer: &mut W) -> Result<()> {
+                let buf = self.to_be_bytes();
                 writer.write_all(&buf)?;
                 Ok(())
             }
@@ -53,12 +74,12 @@ pub trait ReadExt: Read {
     }
 
     #[inline]
-    fn read_le<T: Endian>(&mut self) -> Result<T> {
+    fn read_le<T: ReadEndian>(&mut self) -> Result<T> {
         T::read_le(self)
     }
 
     #[inline]
-    fn read_be<T: Endian>(&mut self) -> Result<T> {
+    fn read_be<T: ReadEndian>(&mut self) -> Result<T> {
         T::read_be(self)
     }
 }
@@ -70,12 +91,12 @@ pub trait WriteExt: Write {
     }
 
     #[inline]
-    fn write_le<T: Endian>(&mut self, value: T) -> Result<()> {
+    fn write_le<T: WriteEndian>(&mut self, value: T) -> Result<()> {
         T::write_le(value, self)
     }
 
     #[inline]
-    fn write_be<T: Endian>(&mut self, value: T) -> Result<()> {
+    fn write_be<T: WriteEndian>(&mut self, value: T) -> Result<()> {
         T::write_be(value, self)
     }
 }

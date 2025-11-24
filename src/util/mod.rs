@@ -3,7 +3,7 @@ use std::io::{Error, Read, Result};
 mod color;
 pub use color::Color;
 mod io;
-pub use io::{Endian, ReadExt, WriteExt};
+pub use io::{ReadEndian, ReadExt, WriteExt};
 mod lzss;
 pub use lzss::decompress as lzss_decompress;
 
